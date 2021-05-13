@@ -14,7 +14,7 @@ class DataGen:
     def __init__(
             self,
             datadir="/home/dmytro/Data/scanner_images",
-            datadir_val="/home/dmytro/Data/scanner_images_test",
+            datadir_val="/home/dkorenkevych/Data/scanner_images_test",
             num_workers=10,
             img_dim=(256, 256),
             separate_validation=False
@@ -35,8 +35,8 @@ class DataGen:
             'val': {}
         }
         self.batch_size = {
-            'train': 50,
-            'val': 50
+            'train': 100,
+            'val': 100
         }
         self.data_size = {
             'train': 0,
@@ -115,17 +115,17 @@ class DataGen:
     def _build_dataset(self, val_split=0.1):
         with open(os.path.join(self.datadir, "metadata.pkl"), "rb") as f:
             metadata = pickle.load(f)
-        if len(metadata['image_file']) > 1000000:
-            val_split = 0.01
+        # if len(metadata['image_file']) > 1000000:
+        #     val_split = 0.01
         self.val_metadata = metadata
         if self.separate_validation:
             with open(os.path.join(self.datadir_val, "metadata.pkl"), "rb") as f:
                 self.val_metadata = pickle.load(f)
-        self.data_size['train'] = int(len(metadata['image_file']) * (1 - val_split))
+        self.data_size['val'] = int(np.clip(int(len(metadata['image_file']) * val_split), 0, 10000))
+        self.data_size['train'] = len(metadata['image_file']) - self.data_size['val']
         self.data_size['train'] = self.data_size['train'] - self.data_size['train'] % self.batch_size['train']
         self._img_keys['train'] = metadata['image_file'][:self.data_size['train']]
         self._outlines['train'] = metadata['barcode_outline'][:self.data_size['train']]
-        self.data_size['val'] = len(metadata['image_file']) - self.data_size['train']
         self.data_size['val'] = self.data_size['val'] - self.data_size['val'] % self.batch_size['val']
         self._img_keys['val'] = metadata['image_file'][-self.data_size['val']:]
         self._outlines['val'] = metadata['barcode_outline'][-self.data_size['val']:]
@@ -294,8 +294,8 @@ class DataGen:
         return new_img[shift[0]:shift[0] + img.shape[0], shift[1]:shift[1] + img.shape[1]]
 
     def load_image(self, filename, outline, dataset):
-        if dataset == "val" and self.separate_validation:
-            filename = filename.replace("scanner_images", "scanner_images_test")
+        # if dataset == "val" and self.separate_validation:
+        #     filename = filename.replace("scanner_images", "scanner_images_test")
         img = np.load(filename)
         img = self.preprocess_image(img, dataset)
         # with open(filename, "rb") as f:

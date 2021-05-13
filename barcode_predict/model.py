@@ -17,7 +17,7 @@ import argparse
 
 
 from barcode_predict.data_gen import DataGen
-from keras.callbacks import LambdaCallback, ModelCheckpoint
+from keras.callbacks import LambdaCallback, ModelCheckpoint, TensorBoard
 
 
 class KerasDataGenerator(keras.utils.Sequence):
@@ -38,8 +38,8 @@ class KerasDataGenerator(keras.utils.Sequence):
         'Denotes the number of batches per epoch'
         batches_per_epoch = self.data_gen.data_size[self.dataset]//self.data_gen.batch_size[self.dataset]
         if self.dataset == "train":
-            if self.data_gen.data_size[self.dataset] > 1e6:
-                batches_per_epoch //= 20
+            if self.data_gen.data_size[self.dataset] > 5e5:
+                batches_per_epoch //= 10
             else:
                 batches_per_epoch //= 2
         return batches_per_epoch
@@ -271,6 +271,7 @@ class ResnetModel:
                 self.save()
             #self.save()
         on_epoch_end = LambdaCallback(on_epoch_end=lambda epoch, logs: print_logs(epoch, logs))
+        tensorboard_callback = TensorBoard(log_dir="logs")
         save_callback = ModelCheckpoint(filepath="saved_models/barcode_prediction_model_{}.pkl".format(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')),
                                         save_weights_only=True,
                                         period=1
@@ -284,7 +285,8 @@ class ResnetModel:
                        verbose=2,
                        callbacks=[
                            #on_epoch_end,
-                           save_callback
+                           save_callback,
+                           tensorboard_callback
                        ]
                        )
 
@@ -371,7 +373,11 @@ class ResnetModel:
             # loss, acc = self.model.evaluate(data, to_categorical(labels, num_classes=self.num_classes), verbose=0)
 
             for i in range(len(data)):
-                if True or logits[i, 1] < 0.1 or logits[i, 1] > 1.8:
+                pred_error = np.linalg.norm(logits[i][:, :, 1:] - labels[i])
+                if pred_error > 15:
+                    print("pred error", pred_error)
+                    logits[i][0, 0, 1] = 0
+                    logits[i][0, 1, 1] = 1
                     imgs_to_show.append(data[i])
                     labels_to_show.append(labels[i])
                     logits_to_show.append(logits[i])
@@ -394,7 +400,6 @@ class ResnetModel:
                     if i < 2:
                         plt.title("Label", fontsize=16)
 
-
                     plt.subplot(im_num//2, 6, (i // 2) * 6 + (i%2) * 3 + 3)
                     plt.imshow(logits_to_show[i][:, :, 1], cmap='gray')
                     plt.xticks([])
@@ -402,7 +407,6 @@ class ResnetModel:
                     if i < 2:
                         plt.title("Prediction", fontsize=16)
 
-                plt.subplots_adjust(wspace=0.01)
                 plt.show()
 
             imgs_to_show = []
@@ -417,6 +421,9 @@ class ResnetModel:
         imgs_to_show = []
         logits_to_show = []
         for i in range(len(data['images'])):
+            if np.random.random() > 1:
+                continue
+            print("i", i)
             # if not data['scanner_ids'][i] in ["1", "2"]:
             #     continue
             imgs = data['images'][i, :, :256*256*2]
@@ -426,8 +433,6 @@ class ResnetModel:
             #logits[0, 0, 1, 1] = 0
             #logits[1, 0, 0, 1] = 1
             #logits[1, 0, 1, 1] = 0
-
-
 
             im_num = 4
 
@@ -449,6 +454,7 @@ class ResnetModel:
                 plt.show()
                 imgs_to_show = []
                 logits_to_show = []
+
         cvb = 1
 
     def show_score_hist(self):
