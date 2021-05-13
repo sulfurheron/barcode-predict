@@ -130,7 +130,7 @@ class ImageDownloader:
         print("interval", interval)
         urls = self.query_pg_ids(interval)
         if not len(urls):
-            return
+            return interval, int_end_str, urls
         # check the directory exists:
         if os.path.isdir(self.datadir_temp):
             try:
@@ -139,7 +139,7 @@ class ImageDownloader:
                 print("Error cleaning directory: %s : %s" % (self.datadir_temp, e.strerror))
         os.mkdir(self.datadir_temp)
         self.download(urls)
-        return interval, urls
+        return interval, int_end_str, urls
 
     def resize_outline(self, outline, orig_shape, new_shape):
         new_outline = [
@@ -180,6 +180,8 @@ class ImageDownloader:
 
     def sort_files(self, data_dict, urls, interval):
         #plt.figure(figsize=(20, 12))
+        if not len(urls):
+            return
         for url in urls:
             if os.path.exists(os.path.join(self.datadir_temp, url['phase_group_id'])):
                 filenames = os.listdir(os.path.join(self.datadir_temp, url['phase_group_id']))
@@ -234,7 +236,7 @@ class ImageDownloader:
 
     def pull_data_batch(self):
         self.images_num = 0
-        int_end_str = '2021-04-11 00:00:00'
+        int_end_str = '2021-05-11 00:00:00'
         self.current_dir_id = 0
         self.current_file_id = 0
         data_dict = {
@@ -248,17 +250,17 @@ class ImageDownloader:
             "interval": [],
         }
         while True:
-            interval, urls = self.download_batch(int_end_str)
+            interval, int_end_str, urls = self.download_batch(int_end_str)
             self.sort_files(data_dict, urls, interval)
-            if self.images_num > 10000:
+            if self.images_num > 1000000:
                 break
 
 
 if __name__ == "__main__":
     imd = ImageDownloader(
         bucket="kin-sms-media-live",
-        datadir="/home/dmytro/Data/scanner_images",
-        datadir_temp="/home/dmytro/Data/scanner_images/temp")
+        datadir="/home/dkorenkevych/Data/scanner_images",
+        datadir_temp="/home/dkorenkevych/Data/scanner_images/temp")
     imd.pull_data_batch()
     # urls = imd.query_pg_ids()
     # imd.download(urls)
