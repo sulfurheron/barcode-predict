@@ -17,7 +17,7 @@ class DataGen:
             datadir_val="/home/dmytro/Data/scanner_images_test",
             num_workers=10,
             img_dim=(256, 256),
-            separate_validation = True
+            separate_validation=False
     ):
         self.datadir = datadir
         self.datadir_val = datadir_val

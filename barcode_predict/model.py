@@ -360,10 +360,14 @@ class ResnetModel:
         imgs_to_show = []
         labels_to_show = []
         logits_to_show = []
-        im_num = 1
+        im_num = 8
         for mb in self.data_gen.generate_batch(dataset="val"):
             data, labels = mb
             logits = self.model.predict(data)
+            #logits[0, 0, 0, 1] = 1
+            #logits[0, 0, 1, 1] = 0
+            #logits[1, 0, 0, 1] = 1
+            #logits[1, 0, 1, 1] = 0
             # loss, acc = self.model.evaluate(data, to_categorical(labels, num_classes=self.num_classes), verbose=0)
 
             for i in range(len(data)):
@@ -376,20 +380,29 @@ class ResnetModel:
             if len(imgs_to_show) >= im_num:
                 plt.figure(figsize=(20, 12))
                 for i in range(im_num):
-                    plt.subplot(im_num, 3, i * 3 + 1)
+                    plt.subplot(im_num//2, 6, (i // 2) * 6 + (i%2) * 3 + 1)
                     plt.imshow(imgs_to_show[i][:, :, 0], cmap='gray')
                     plt.xticks([])
                     plt.yticks([])
+                    if i < 2:
+                        plt.title("Image", fontsize=16)
 
-                    plt.subplot(im_num, 3, i * 3 + 2)
+                    plt.subplot(im_num//2, 6, (i // 2) * 6 + (i%2) * 3 + 2)
                     plt.imshow(labels_to_show[i][:, :, 0], cmap='gray')
                     plt.xticks([])
                     plt.yticks([])
+                    if i < 2:
+                        plt.title("Label", fontsize=16)
 
-                    plt.subplot(im_num, 3, i * 3 + 3)
+
+                    plt.subplot(im_num//2, 6, (i // 2) * 6 + (i%2) * 3 + 3)
                     plt.imshow(logits_to_show[i][:, :, 1], cmap='gray')
                     plt.xticks([])
                     plt.yticks([])
+                    if i < 2:
+                        plt.title("Prediction", fontsize=16)
+
+                plt.subplots_adjust(wspace=0.01)
                 plt.show()
 
             imgs_to_show = []
@@ -400,31 +413,42 @@ class ResnetModel:
         import pickle
         with open("ppo_vpred_images_prod_2.pkl", "rb") as f:
             data = pickle.load(f)
+        plt.figure(figsize=(20, 12))
+        imgs_to_show = []
+        logits_to_show = []
         for i in range(len(data['images'])):
             # if not data['scanner_ids'][i] in ["1", "2"]:
             #     continue
             imgs = data['images'][i, :, :256*256*2]
-            imgs = np.reshape(imgs, (2, 256, 256, 1)).astype('float32')/255.0
+            imgs = np.reshape(imgs, (2, 256, 256, 1)).astype('float32')
             logits = self.model.predict(imgs)
-            logits[0, 0, 0, 1] = 1
-            logits[0, 0, 1, 1] = 0
-            logits[1, 0, 0, 1] = 1
-            logits[1, 0, 1, 1] = 0
-            plt.figure(figsize=(20, 12))
+            #logits[0, 0, 0, 1] = 1
+            #logits[0, 0, 1, 1] = 0
+            #logits[1, 0, 0, 1] = 1
+            #logits[1, 0, 1, 1] = 0
 
-            imgs_to_show = imgs
-            im_num = 1
-            for j in range(im_num):
-                plt.subplot(im_num, 2, j * 2 + 1)
-                plt.imshow(imgs[j][:, :, 0], cmap='gray')
-                plt.xticks([])
-                plt.yticks([])
 
-                plt.subplot(im_num, 2, j * 2 + 2)
-                plt.imshow(logits[j][:, :, 1], cmap='gray')
-                plt.xticks([])
-                plt.yticks([])
-            plt.show()
+
+            im_num = 4
+
+            if np.random.random() < 0.1:
+                imgs_to_show.append(imgs)
+                logits_to_show.append(logits)
+
+            if len(imgs_to_show) >= im_num:
+                for j in range(im_num):
+                    plt.subplot(im_num, 2, j * 2 + 1)
+                    plt.imshow(imgs_to_show[j][0, :, :, 0], cmap='gray')
+                    plt.xticks([])
+                    plt.yticks([])
+
+                    plt.subplot(im_num, 2, j * 2 + 2)
+                    plt.imshow(logits_to_show[j][0, :, :, 1], cmap='gray')
+                    plt.xticks([])
+                    plt.yticks([])
+                plt.show()
+                imgs_to_show = []
+                logits_to_show = []
         cvb = 1
 
     def show_score_hist(self):
@@ -480,7 +504,7 @@ if __name__ == "__main__":
     #model.show_pictures()
     #model.show_score_hist()
     model.train()
-    #model.model.load_weights("saved_models/barcode_prediction_model_2021-05-11-18-03-33.pkl")
+    #model.model.load_weights("saved_models/barcode_prediction_model_2021-05-11-16-52-26.pkl")
     #model.show_pictures()
     #model.show_pictures_no_scan()
     #model.save()

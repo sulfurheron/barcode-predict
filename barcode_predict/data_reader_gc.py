@@ -234,7 +234,7 @@ class ImageDownloader:
 
     def pull_data_batch(self):
         self.images_num = 0
-        int_end_str = '2021-04-11 00:00:00'
+        int_end_str = '2021-05-11 00:00:00'
         self.current_dir_id = 0
         self.current_file_id = 0
         data_dict = {
@@ -250,7 +250,7 @@ class ImageDownloader:
         while True:
             interval, urls = self.download_batch(int_end_str)
             self.sort_files(data_dict, urls, interval)
-            if self.images_num > 10000:
+            if self.images_num > 100000:
                 break
 
 
