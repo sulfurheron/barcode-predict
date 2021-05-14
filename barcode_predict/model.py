@@ -281,6 +281,15 @@ class ResnetModel:
                        ]
                        )
 
+    def compute_iou(self, logits, labels):
+        logits = np.argmax(logits, axis=-1)
+        labels = labels[:, :, :, 0]
+        ints = []
+        inter = np.sum(logits * labels, axis=(1, 2))
+        union = np.sum(logits, axis=(1, 2)) + np.sum(labels, axis=(1, 2)) - inter
+        return inter/union
+
+
     def evaluate_on_validation_set(self):
         """Evaluate on orders combined from images from validation set."""
         #predictions = []
@@ -288,17 +297,21 @@ class ResnetModel:
         predictions = []
         all_logits = []
         batches_processed = 0
+        ious = []
         for mb in self.data_gen.generate_batch(dataset="val"):
             data, labels = mb
             logits = self.model.predict(data)
+            iou = self.compute_iou(logits, labels)
+            ious.append(iou)
             #loss, acc = self.model.evaluate(data, to_categorical(labels, num_classes=self.num_classes), verbose=0)
-            predictions.append(np.argmax(logits, axis=-1) == labels)
-            class_labels.append(labels)
-            all_logits.append(logits[:, 1])
+            #predictions.append(np.argmax(logits, axis=-1) == labels)
+            #class_labels.append(labels)
+            #all_logits.append(logits[:, 1])
             #preds.append(preds)
             batches_processed += 1
             if batches_processed > self.data_gen.data_size['val']//self.data_gen.batch_size['val']:
                 break
+        print("mIOU", np.mean(np.hstack(ious)))
         predictions = np.hstack(predictions)
         class_labels = np.hstack(class_labels)
         all_logits = np.hstack(all_logits)

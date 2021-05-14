@@ -35,8 +35,8 @@ class DataGen:
             'val': {}
         }
         self.batch_size = {
-            'train': 32,
-            'val': 32
+            'train': 100,
+            'val': 100
         }
         self.data_size = {
             'train': 0,
