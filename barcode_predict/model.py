@@ -191,48 +191,34 @@ class ResnetModel:
             metrics=["accuracy"],
         )
 
-    def build_model_xception(self):
-        """Builds the network symbolic graph in tensorflow."""
-        self.img = Input(name="input", shape=self.input_shape, dtype='float32')
-        x = self.img
-        x = xception.Xception(
-            weights='imagenet',
-            input_shape=(self.input_shape),
-            include_top=False,
-            pooling="avg",
-            #classes=2
-        )(x)
-        #self.output = x
-        self.output = Dense(self.num_classes, activation="softmax")(x)
-        self.model = Model(inputs=self.img, outputs=self.output)
-        self.model.compile(
-            loss="categorical_crossentropy",
-            optimizer=Adam(learning_rate=self.learning_rate),
-            metrics=["accuracy"],
-        )
+    def unet_conv_block(self, input, filters, kernel_size):
+        x = Conv2D(filters, (kernel_size, kernel_size), strides=(1, 1),
+                                             activation="relu",
+                                             padding='same')(input)
+        x = Conv2D(filters, (kernel_size, kernel_size), strides=(1, 1),
+                   activation="relu",
+                   padding='same')(x)
+        return x
 
-    def build_model_impala(self):
-        """Builds the network symbolic graph in tensorflow."""
+    def build_model_unet(self):
+        filters = 16
+        blocks = 3
         self.img = Input(name="input", shape=self.input_shape, dtype='float32')
         x = self.img
-        channels = [16, 32, 32]
-        for channel in channels:
-            x = Conv2D(channel, (3, 3), strides=(1, 1),
-                                             padding='same')(x)
-            x = MaxPool2D(pool_size=(3, 3), strides=(2, 2), padding='same')(x)
-            # residual blocks
-            for j in range(2):
-                block_input = x
-                x = ReLU()(x)
-                x = Conv2D(channel, (3, 3), strides=(1, 1),
-                                                 activation='relu',
-                                                 padding='same')(x)
-                x = Conv2D(channel, (3, 3), strides=(1, 1),
-                                                 padding='same')(x)
-                x = Add()([x, block_input])
-        x = ReLU()(x)
-        x = GlobalMaxPooling2D()(x)
-        self.output = Dense(self.num_classes, activation="softmax")(x)
+        contract_tensors = []
+        for block in range(blocks):
+            x = self.unet_conv_block(x, filters, 3)
+            contract_tensors.append(x)
+            x = MaxPool2D((2, 2))(x)
+            filters *= 2
+
+        for block in range(blocks):
+            x = Conv2DTranspose(filters, (3, 3), strides=(2, 2), activation="relu", padding="same")(x)
+            x = Concatenate(axis=-1)([x, contract_tensors[-(block + 1)]])
+            filters //= 2
+            x = self.unet_conv_block(x, filters, 3)
+
+        self.output = Conv2D(2, (1, 1), padding="same", activation="softmax")(x)
         self.model = Model(inputs=self.img, outputs=self.output)
         self.model.compile(
             loss="categorical_crossentropy",
@@ -271,7 +257,7 @@ class ResnetModel:
                 self.save()
             #self.save()
         on_epoch_end = LambdaCallback(on_epoch_end=lambda epoch, logs: print_logs(epoch, logs))
-        tensorboard_callback = TensorBoard(log_dir="logs")
+        tensorboard_callback = TensorBoard(log_dir="logs/unet_3blocks_16filters_{}".format(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')))
         save_callback = ModelCheckpoint(filepath="saved_models/barcode_prediction_model_{}.pkl".format(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')),
                                         save_weights_only=True,
                                         period=1
