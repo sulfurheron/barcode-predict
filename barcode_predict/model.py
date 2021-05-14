@@ -5,6 +5,7 @@ import tensorflow as tf
 import keras.backend as K
 from keras.losses import categorical_crossentropy
 from keras.utils import to_categorical
+from keras.metrics import Precision, MeanIoU, AUC
 from keras.models import Model
 import time
 import datetime
@@ -14,6 +15,7 @@ from sklearn.metrics import roc_curve, roc_auc_score
 import matplotlib.pyplot as plt
 from keras.regularizers import l2
 import argparse
+import cv2
 
 
 from barcode_predict.data_gen import DataGen
@@ -185,10 +187,13 @@ class ResnetModel:
             x = layer(x)
         self.output = Conv2D(2, (3, 3), padding="same", activation="softmax")(x)
         self.model = Model(inputs=self.img, outputs=self.output)
+        precision = Precision(class_id=1)
+        #meanIoU = MeanIoU(num_classes=2)
+        auc = AUC()
         self.model.compile(
             loss="categorical_crossentropy",
             optimizer=Adam(learning_rate=self.learning_rate),
-            metrics=["accuracy"],
+            metrics=["accuracy", precision, auc],
         )
 
     def unet_conv_block(self, input, filters, kernel_size):
@@ -348,7 +353,7 @@ class ResnetModel:
         imgs_to_show = []
         labels_to_show = []
         logits_to_show = []
-        im_num = 8
+        im_num = 2
         for mb in self.data_gen.generate_batch(dataset="val"):
             data, labels = mb
             logits = self.model.predict(data)
@@ -360,7 +365,7 @@ class ResnetModel:
 
             for i in range(len(data)):
                 pred_error = np.linalg.norm(logits[i][:, :, 1:] - labels[i])
-                if pred_error > 15:
+                if pred_error > 20:
                     print("pred error", pred_error)
                     logits[i][0, 0, 1] = 0
                     logits[i][0, 1, 1] = 1
@@ -371,22 +376,35 @@ class ResnetModel:
                         break
             if len(imgs_to_show) >= im_num:
                 plt.figure(figsize=(20, 12))
+                if im_num > 2:
+                    y_dim = 6
+                    x_dim = im_num // 2
+                else:
+                    y_dim = 3
+                    x_dim = im_num
+                alpha = 0.6
                 for i in range(im_num):
-                    plt.subplot(im_num//2, 6, (i // 2) * 6 + (i%2) * 3 + 1)
-                    plt.imshow(imgs_to_show[i][:, :, 0], cmap='gray')
+                    plt.subplot(x_dim, y_dim, (i // 2) * y_dim + (i%2) * 3 + 1)
+                    gray_img = imgs_to_show[i]
+                    #rgb_img = cv2.cvtColor((gray_img * 255).astype("uint8"), cv2.COLOR_GRAY2BGR)
+                    rgb_img = (np.repeat(gray_img, repeats=3, axis=-1) * 255).astype('uint8')
+                    heat_map = cv2.applyColorMap((logits_to_show[i][:, :, 1] * 255).astype("uint8"), cv2.COLORMAP_JET)
+                    fin_img = cv2.addWeighted(rgb_img, alpha, heat_map, 1 - alpha, 0)
+                    fin_img = fin_img[:, :, ::-1]
+                    plt.imshow(fin_img)
                     plt.xticks([])
                     plt.yticks([])
                     if i < 2:
                         plt.title("Image", fontsize=16)
 
-                    plt.subplot(im_num//2, 6, (i // 2) * 6 + (i%2) * 3 + 2)
+                    plt.subplot(x_dim, y_dim, (i // 2) * y_dim + (i%2) * 3 + 2)
                     plt.imshow(labels_to_show[i][:, :, 0], cmap='gray')
                     plt.xticks([])
                     plt.yticks([])
                     if i < 2:
                         plt.title("Label", fontsize=16)
 
-                    plt.subplot(im_num//2, 6, (i // 2) * 6 + (i%2) * 3 + 3)
+                    plt.subplot(x_dim, y_dim, (i // 2) * y_dim + (i%2) * 3 + 3)
                     plt.imshow(logits_to_show[i][:, :, 1], cmap='gray')
                     plt.xticks([])
                     plt.yticks([])
@@ -395,51 +413,67 @@ class ResnetModel:
 
                 plt.show()
 
-            imgs_to_show = []
-            labels_to_show = []
-            logits_to_show = []
+                imgs_to_show = []
+                labels_to_show = []
+                logits_to_show = []
 
     def show_pictures_no_scan(self):
         import pickle
-        with open("ppo_vpred_images_prod_2.pkl", "rb") as f:
-            data = pickle.load(f)
+        # with open("ppo_vpred_images_prod_2.pkl", "rb") as f:
+        #     data = pickle.load(f)
+        data = np.load("rlscan_episodes_images.npy")
         plt.figure(figsize=(20, 12))
         imgs_to_show = []
         logits_to_show = []
-        for i in range(len(data['images'])):
+        for i in range(len(data)):
             if np.random.random() > 1:
                 continue
             print("i", i)
             # if not data['scanner_ids'][i] in ["1", "2"]:
             #     continue
-            imgs = data['images'][i, :, :256*256*2]
-            imgs = np.reshape(imgs, (2, 256, 256, 1)).astype('float32')
+            imgs = data[i:i+1].astype("float32")/255
             logits = self.model.predict(imgs)
-            #logits[0, 0, 0, 1] = 1
-            #logits[0, 0, 1, 1] = 0
+            logits[0, 0, 0, 1] = 1
+            logits[0, 0, 1, 1] = 0
             #logits[1, 0, 0, 1] = 1
             #logits[1, 0, 1, 1] = 0
 
             im_num = 4
-
+            if im_num > 2:
+                y_dim = 4
+                x_dim = im_num // 2
+            else:
+                y_dim = 2
+                x_dim = im_num
             if np.random.random() < 0.1:
                 imgs_to_show.append(imgs)
                 logits_to_show.append(logits)
-
+            alpha = 0.6
             if len(imgs_to_show) >= im_num:
                 for j in range(im_num):
-                    plt.subplot(im_num, 2, j * 2 + 1)
-                    plt.imshow(imgs_to_show[j][0, :, :, 0], cmap='gray')
+                    plt.subplot(x_dim, y_dim, (j // 2) * y_dim + (j%2) * 2 + 1)
+                    gray_img = imgs_to_show[j][0, :, :, :1]
+                    # rgb_img = cv2.cvtColor((gray_img * 255).astype("uint8"), cv2.COLOR_GRAY2BGR)
+                    rgb_img = (np.repeat(gray_img, repeats=3, axis=-1) * 255).astype('uint8')
+                    heat_map = cv2.applyColorMap((logits_to_show[j][0, :, :, 1] * 255).astype("uint8"), cv2.COLORMAP_JET)
+                    fin_img = cv2.addWeighted(rgb_img, alpha, heat_map, 1 - alpha, 0)
+                    fin_img = fin_img[:, :, ::-1]
+
+                    plt.imshow(fin_img)
                     plt.xticks([])
                     plt.yticks([])
-
-                    plt.subplot(im_num, 2, j * 2 + 2)
+                    if j < 2:
+                        plt.title("Image", fontsize=16)
+                    plt.subplot(x_dim, y_dim, (j // 2) * y_dim + (j%2) * 2 + 2)
                     plt.imshow(logits_to_show[j][0, :, :, 1], cmap='gray')
                     plt.xticks([])
                     plt.yticks([])
+                    if j < 2:
+                        plt.title("Prediction", fontsize=16)
                 plt.show()
                 imgs_to_show = []
                 logits_to_show = []
+                plt.figure(figsize=(20, 12))
 
         cvb = 1
 
@@ -495,9 +529,11 @@ if __name__ == "__main__":
     #model.evaluate_on_validation_set()
     #model.show_pictures()
     #model.show_score_hist()
-    model.train()
-    #model.model.load_weights("saved_models/barcode_prediction_model_2021-05-11-16-52-26.pkl")
-    #model.show_pictures()
+
+    model.model.load_weights("saved_models/barcode_prediction_model_2021-05-13-12-04-02.pkl")
+    #model.train()
+    model.evaluate_on_validation_set()
+    model.show_pictures()
     #model.show_pictures_no_scan()
     #model.save()
 
