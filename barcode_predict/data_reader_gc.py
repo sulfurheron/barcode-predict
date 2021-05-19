@@ -128,7 +128,7 @@ class ImageDownloader:
                         f.write(data)
         except aiohttp.ClientError as ce:
             print('Encountered ClientError when downloading item',
-                  extra={
+                  {
                       'bucket': self._bucket, 'key': image_filename,
                       'download_location': image_filepath,
                       'exception': ce.__str__(),
