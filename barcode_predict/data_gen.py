@@ -10,6 +10,11 @@ import cv2
 
 
 class DataGen:
+    """Generates minibatches of data to be used by an external training function.
+
+    Pre-fetches minibatches of images saved to hard disk using
+    multiprocessing to minimize the bottleneck of loading the data.
+    """
 
     def __init__(
             self,
@@ -69,12 +74,24 @@ class DataGen:
         self._locks = {'train': {}, 'val': {}}
         self._ix_locks = {'train': mp.Lock(), 'val': mp.Lock()}
         self._permuted_ix = {
-            'train': np.frombuffer(mp.Array('i', self.data_size['train']).get_obj(), dtype="int32"),
-            'val': np.frombuffer(mp.Array('i', self.data_size['val']).get_obj(), dtype="int32")
+            'train': np.frombuffer(
+                mp.Array('i', self.data_size['train']).get_obj(),
+                dtype="int32"
+            ),
+            'val': np.frombuffer(
+                mp.Array('i', self.data_size['val']).get_obj(),
+                dtype="int32"
+            )
         }
         self._ix_processed = {
-            'train': np.frombuffer(mp.Array('i', self.data_size['train']).get_obj(), dtype="int32"),
-            'val': np.frombuffer(mp.Array('i', self.data_size['val']).get_obj(), dtype="int32")
+            'train': np.frombuffer(
+                mp.Array('i', self.data_size['train']).get_obj(),
+                dtype="int32"
+            ),
+            'val': np.frombuffer(
+                mp.Array('i', self.data_size['val']).get_obj(),
+                dtype="int32"
+            )
         }
         self.manager = mp.Manager()
         self.processed_batches = {}
@@ -113,10 +130,10 @@ class DataGen:
             self._process_list.append(p_val)
 
     def _build_dataset(self, val_split=0.1):
+        """Summarizes all the available data to use for
+        minibatches generation."""
         with open(os.path.join(self.datadir, "metadata.pkl"), "rb") as f:
             metadata = pickle.load(f)
-        # if len(metadata['image_file']) > 1000000:
-        #     val_split = 0.01
         self.val_metadata = metadata
         if self.separate_validation:
             with open(os.path.join(self.datadir_val, "metadata.pkl"), "rb") as f:
@@ -139,6 +156,7 @@ class DataGen:
         print("data size", self.data_size)
 
     def _compute_mean_statistics(self):
+        """Computes pixel-wise mean and st.d. of a training dataset."""
         if os.path.isfile("pixel_mean.pkl"):
             with open("pixel_mean.pkl", "rb") as f:
                 self.pixel_mean = pickle.load(f)
@@ -148,6 +166,7 @@ class DataGen:
         count = 0
         for i in range(len(self._img_keys['train'])):
             filename = self._img_keys['train'][i]
+            outline = self._outlines['train'][i]
             img = self.load_image(filename, outline, 'train')
             self.pixel_mean += img
             count += 1
@@ -167,10 +186,6 @@ class DataGen:
 
         This function is run by concurrent processes.
         """
-
-        if dataset == "val":
-            cvb = 1
-        scan_attempt_start = time.time()
         while not self._terminate.value:
             for id in self._new_batch[dataset]:
                 if not self._new_batch[dataset][id].value:
@@ -178,7 +193,6 @@ class DataGen:
                     if not locked:
                         continue
                     locked2 = False
-                    start_time = time.time()
                     while not locked2:
                         locked2 = self._ix_locks[dataset].acquire()
                         if not locked2:
@@ -186,12 +200,8 @@ class DataGen:
                     if not locked2:
                         print("failed to get a lock")
                         continue
-                    # if time.time() - start_time > 1e-3:
-                    #     print("proc {} waited for lock2 {}".format(proc_id, time.time() - start_time))
-                    #if self.data_size[dataset] - self._start[dataset].value < self.batch_size[dataset]:
                     if not len(self.unprocessed_batches[dataset]):
                         print("Reached the end of the dataset {} resetting".format(dataset))
-                        #np.copyto(self._ix_processed[dataset], np.zeros(self._ix_processed[dataset].shape, dtype="int32"))
                         self._start[dataset].value = 0
                         wait_start = time.time()
                         while len(self.unprocessed_batches_local[dataset]) and time.time() - wait_start < 60:
@@ -204,7 +214,6 @@ class DataGen:
                             self.unprocessed_batches[dataset][i] = 1
                             self.unprocessed_batches_local[dataset][i] = 1
                         print("Finished resetting {}".format(dataset))
-                    #np.copyto(self._ix_processed[dataset][self._start[dataset]: self._start[dataset] + self.batch_size[dataset]], np.ones(self.batch_size[dataset], dtype="int32"))
                     for key in self.unprocessed_batches[dataset].keys():
                         start_ix = key
                         del self.unprocessed_batches[dataset][key]
@@ -213,27 +222,18 @@ class DataGen:
                     self._ix_locks[dataset].release()
                     if len(ix_range) < self.batch_size[dataset]:
                         continue
-                    #load_start = time.time()
                     data, labels = self.load_batch(ix_range, dataset=dataset)
-                    #print("proc id {} loaded data in {}".format(proc_id, time.time() - load_start))
                     data = np.array(data)
-                    #data = np.expand_dims(np.array(data), axis=-1)
                     labels = np.array(labels)
                     np.copyto(self._batch_dict[dataset][id]["data"], data)
                     np.copyto(self._batch_dict[dataset][id]["labels"], labels)
                     self._batch_dict[dataset][id]["start_ix"].value = start_ix
                     self._new_batch[dataset][id].value = 1
-                    #print("stored batch into id", id)
                     batches_aval = sum([self._new_batch[dataset][i].value for i in self._new_batch[dataset]])
-                    #print("start", dataset, self._start[dataset].value)
                     if dataset == "train" and batches_aval < 5:
                         print("Prepared new batch, {} batches available".format(batches_aval))
                     self.progress_in_epoch.value = (self._start[dataset].value + 0.0)/len(self._permuted_ix[dataset])
-                    #break
                     self._locks[dataset][id].release()
-                    #print("proc_id {} finished scan attempt in {}".format(proc_id, time.time() - scan_attempt_start))
-                    scan_attempt_start = time.time()
-            #print("Im sleeping")
             time.sleep(0.1)
 
     def generate_batch(self, dataset="train"):
@@ -244,8 +244,6 @@ class DataGen:
         while True:
             for id in self._new_batch[dataset]:
                 if self._new_batch[dataset][id].value:
-                    #print("reading batch from id", id)
-                    #ix = np.random.permutation(self._batch_dict[dataset][id]["data"].shape[0])
                     data = np.copy(self._batch_dict[dataset][id]["data"])
                     labels = np.copy(self._batch_dict[dataset][id]["labels"])
                     self._new_batch[dataset][id].value = 0
@@ -253,7 +251,6 @@ class DataGen:
                         print("ERRROR, {} not in unprocessed".format(self._batch_dict[dataset][id]["start_ix"].value))
                     else:
                         del self.unprocessed_batches_local[dataset][self._batch_dict[dataset][id]["start_ix"].value]
-                    #print("Left unprocessed local", len(self.unprocessed_batches_local[dataset]))
                     yield data, labels
 
     def load_batch(self, ix, dataset='train'):
@@ -264,7 +261,6 @@ class DataGen:
             filename, outline = self._img_keys[dataset][i], self._outlines[dataset][i]
             img, label = self.load_image(filename, outline, dataset)
             images.append(np.expand_dims(img, axis=-1))
-            #img[0, 0, 0] = i + 0.0
             labels.append(np.expand_dims(label, axis=-1).astype("float32"))
             # if dataset == "val":
             #     plt.figure(figsize=(10, 2.8))
@@ -282,10 +278,9 @@ class DataGen:
         return images, labels
 
     def preprocess_image(self, img, dataset):
-        # if not img.shape == self.img_dim:
-        #     img = cv2.resize(img, self.img_dim, cv2.INTER_AREA)
+        if not img.shape == self.img_dim:
+            img = cv2.resize(img, self.img_dim, cv2.INTER_AREA)
         img = (img/255.0).astype('float32')
-        #img -= np.mean(img)
         if True or not dataset == "train":
             return img
         shift = np.random.randint(0, self.crop_size, size=(2))
@@ -294,19 +289,12 @@ class DataGen:
         return new_img[shift[0]:shift[0] + img.shape[0], shift[1]:shift[1] + img.shape[1]]
 
     def load_image(self, filename, outline, dataset):
-        # if dataset == "val" and self.separate_validation:
-        #     filename = filename.replace("scanner_images", "scanner_images_test")
         img = np.load(filename)
         img = self.preprocess_image(img, dataset)
-        # with open(filename, "rb") as f:
-        #     jpg_frames = pickle.load(f)
-        # img, label_orig = [np.array(Image.open(jpg)) for jpg in jpg_frames]
         pil_mask = Image.new('L', img.shape, 0)
         outline_arr = [(point["x"], point["y"]) for point in outline]
         ImageDraw.Draw(pil_mask).polygon(outline_arr, outline=1, fill=1)
         label = np.array(pil_mask)
-        #print("labels close", np.allclose(label, label_orig))
-        #label[label > 0] = 1
         return img, label
 
 

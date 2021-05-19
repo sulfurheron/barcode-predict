@@ -23,7 +23,7 @@ from keras.callbacks import LambdaCallback, ModelCheckpoint, TensorBoard
 
 
 class KerasDataGenerator(keras.utils.Sequence):
-    'Generates data for Keras'
+    "A generator class expected by a Keras model."
     def __init__(self, data_gen, n_channels=1,
                  shuffle=True, dataset="train"):
         'Initialization'
@@ -41,28 +41,15 @@ class KerasDataGenerator(keras.utils.Sequence):
         batches_per_epoch = self.data_gen.data_size[self.dataset]//self.data_gen.batch_size[self.dataset]
         if self.dataset == "train":
             if self.data_gen.data_size[self.dataset] > 5e5:
-                batches_per_epoch //= 10
+                batches_per_epoch //= 10    # define epoch as 1/10-th of a dataset size
             else:
                 batches_per_epoch //= 2
         return batches_per_epoch
 
     def __getitem__(self, index):
         'Generate one batch of data'
-        # Generate indexes of the batch
-        #print("epoch processing time", time.time() - self.epoch_proc_time)
-        #start_time = time.time()
         data, labels = next(self.data_gen.generate_batch(dataset=self.dataset))
         labels = to_categorical(labels, num_classes=2)
-        #print("epoch acquisition time", time.time() - start_time)
-
-        #labels[labels == 0] = 0.01
-        #labels[labels == 1] = 0.99
-        # if self.dataset == "val":
-        #     print("val counts", np.sum(self.ix_count == 1))
-        # elif self.dataset == "train":
-        #     print("train counts", np.sum(self.ix_count == 1))
-        #print("batch index", index)
-        #self.epoch_proc_time = time.time()
         return data, labels
 
     def on_epoch_end(self):
@@ -70,34 +57,11 @@ class KerasDataGenerator(keras.utils.Sequence):
         return
 
 
-class LabelDistribution(keras.metrics.Metric):
-    """
-    Computes the per-batch label distribution (y_true) and stores the array as
-    a metric which can be accessed via keras CallBack's
-
-    :param n_class: int - number of distinct output class(es)
-    """
-
-    def __init__(self, **kwargs):
-        super(LabelDistribution, self).__init__(**kwargs)
-
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        self.y_true = y_true
-        self.y_pred = y_pred
-
-    def result(self):
-        return self.y_true, self.y_pred
-
-    def reset_states(self):
-        return
-
-
-class ResnetModel:
-
+class BarcodeModel:
+    """A class representing a Keras model for recognizing barcodes on scanner images."""
     def __init__(self,
                  learning_rate=1e-4,
-                 epochs=15,
+                 epochs=500,
                  aggregate_grads=True,
                  gpu=0,
                  datadir="/home/dmytro/Data/scanner_images",
@@ -117,10 +81,9 @@ class ResnetModel:
         self.architecture = architecture
         mydevice = "/gpu:{}".format(gpu)
         with tf.device(mydevice):
-        #with strategy.scope():
             self.init_session()
-            if architecture == "xception":
-                self.build_model_xception()
+            if architecture == "unet":
+                self.build_model_unet()
             else:
                 self.build_model_simple()
 
@@ -187,16 +150,14 @@ class ResnetModel:
             x = layer(x)
         self.output = Conv2D(2, (3, 3), padding="same", activation="softmax")(x)
         self.model = Model(inputs=self.img, outputs=self.output)
-        precision = Precision(class_id=1)
-        #meanIoU = MeanIoU(num_classes=2)
-        auc = AUC()
         self.model.compile(
             loss="categorical_crossentropy",
             optimizer=Adam(learning_rate=self.learning_rate),
-            metrics=["accuracy", precision, auc],
+            metrics=["accuracy"],
         )
 
     def unet_conv_block(self, input, filters, kernel_size):
+        """Builds a single u-net conv block."""
         x = Conv2D(filters, (kernel_size, kernel_size), strides=(1, 1),
                                              activation="relu",
                                              padding='same')(input)
@@ -206,6 +167,7 @@ class ResnetModel:
         return x
 
     def build_model_unet(self):
+        """Builds a u-net model based on https://arxiv.org/abs/1505.04597"""
         filters = 16
         blocks = 3
         self.img = Input(name="input", shape=self.input_shape, dtype='float32')
@@ -232,6 +194,7 @@ class ResnetModel:
         )
 
     def init_session(self):
+        """Initializes tensorflow session."""
         config = tf.ConfigProto(
             allow_soft_placement=True
         )
@@ -240,11 +203,9 @@ class ResnetModel:
         self.sess.__enter__()
 
     def train(self):
+        """Runs the model training loop."""
         self.all_losses = {'train': [], 'val': []}
         self.accs = {'val_sens': [], 'val_spec': [], 'val_sens_single': [], 'val_spec_single': []}
-        # val_sens_single, val_spec_single = self.evaluate_on_validation_singles_set()
-        # print("Validation singles accuracy: sensitivity {}, specificity {}".format(val_sens_single, val_spec_single))
-        # self.evaluate_on_test_singles_set()
         self.max_acc = 0.71
         def print_logs(epoch, logs):
             #val_loss = self.evaluate_on_validation_set()
@@ -262,16 +223,17 @@ class ResnetModel:
                 self.save()
             #self.save()
         on_epoch_end = LambdaCallback(on_epoch_end=lambda epoch, logs: print_logs(epoch, logs))
-        tensorboard_callback = TensorBoard(log_dir="logs/unet_3blocks_16filters_{}".format(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')))
-        save_callback = ModelCheckpoint(filepath="saved_models/barcode_prediction_model_{}.pkl".format(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')),
-                                        save_weights_only=True,
-                                        period=1
-                                        )
+        tensorboard_callback = TensorBoard(
+            log_dir="logs/unet_3blocks_16filters_{}".format(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S'))
+        )
+        save_callback = ModelCheckpoint(
+            filepath="saved_models/barcode_prediction_model_{}.pkl".format(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')),
+            save_weights_only=True,
+            period=1
+        )
         self.model.fit(x=self.keras_data_gen_train,
                        epochs=self.epochs,
                        validation_data=self.keras_data_gen_val,
-                       #steps_per_epoch=100 // self.data_gen.batch_size['train'],
-                       #validation_steps=val_steps,
                        workers=0,
                        verbose=2,
                        callbacks=[
@@ -282,16 +244,16 @@ class ResnetModel:
                        )
 
     def compute_iou(self, logits, labels):
+        """Computes Intersection Over Union metrics for binary class case."""
         logits = np.argmax(logits, axis=-1)
         labels = labels[:, :, :, 0]
-        ints = []
         inter = np.sum(logits * labels, axis=(1, 2))
         union = np.sum(logits, axis=(1, 2)) + np.sum(labels, axis=(1, 2)) - inter
         return inter/union
 
 
     def evaluate_on_validation_set(self):
-        """Evaluate on orders combined from images from validation set."""
+        """Evaluates the model on a validation set."""
         #predictions = []
         class_labels = []
         predictions = []
@@ -325,17 +287,6 @@ class ResnetModel:
         return auc, acc, spec, sens
         #return np.mean(losses)
 
-    def build_roc(self, labels, scores):
-        scores_sorted = sorted(scores)
-        sens = []
-        spec = []
-        for i in range(len(scores_sorted)):
-            pos_pred = scores >= scores_sorted[i]
-            neg_pred = scores < scores_sorted[i]
-            sens.append(np.sum((labels==1) * (pos_pred))/np.sum(labels==1))
-            spec.append(1 - np.sum((labels==0) * neg_pred)/np.sum(labels==0))
-        auc = np.mean(sens)
-        return spec, sens, auc
 
     def save(self):
         import pickle
@@ -533,18 +484,13 @@ if __name__ == "__main__":
     parser.add_argument('--num_images', type=int, default=4)
     parser.add_argument('--color_mode', type=str, default="gray")
     args = parser.parse_args()
-    model = ResnetModel(
+    model = BarcodeModel(
         epochs=args.epochs,
         datadir=args.datadir,
         gpu=args.gpu,
     )
-    #model.load("saved_models/cnn_shared_5_layers_0.718869149684906_2021-03-01-09-51-29.pkl")
-    #model.evaluate_on_validation_set()
-    #model.show_pictures()
-    #model.show_score_hist()
-
     model.model.load_weights("saved_models/barcode_prediction_model_2021-05-13-12-04-02.pkl")
-    #model.train()
+    model.train()
     model.evaluate_on_validation_set()
     model.show_pictures()
     #model.show_pictures_no_scan()
