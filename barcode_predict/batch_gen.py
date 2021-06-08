@@ -46,9 +46,9 @@ class BatchGen:
         self._use_random_crops = use_random_crops
         self.img_dim = img_dim
         self._batch_buffer_size = 10
-        self._build_dataset()
         self._init_vars()
-        self._init_shared_vars()               
+        self._build_dataset()
+        self._init_shared_vars()
         self._start_workers(num_workers)
 
     def _init_shared_vars(self):
@@ -149,9 +149,9 @@ class BatchGen:
         """Starts concurrent processes that build data minibatches."""
         self._process_list = []
         for i in range(num_workers):
-            p = mp.Process(target=self._prepare_minibatch, args=('train', i))
+            p = mp.Process(target=self._prepare_minibatch, args=('train',))
             p.start()
-            p_val = mp.Process(target=self._prepare_minibatch, args=('val', i))
+            p_val = mp.Process(target=self._prepare_minibatch, args=('val',))
             p_val.start()
             self._process_list.append(p)
             self._process_list.append(p_val)
@@ -223,7 +223,8 @@ class BatchGen:
             locked_ix = self._ix_locks[dataset].acquire()
             if not locked_ix:
                 time.sleep(0.01)
-        if not locked_ix:            
+        if not locked_ix:
+            print("failed to get a lock")
             return False
         return True
     
@@ -258,7 +259,6 @@ class BatchGen:
             for id in self._new_batch[dataset]:
                 if not self._new_batch[dataset][id].value:
                     if not self._acquire_locks(dataset, id):
-                        print("failed to get a lock")
                         continue
                     if not len(self._unprocessed_batches[dataset]):
                         self._reset_epoch(dataset)
