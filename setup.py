@@ -8,7 +8,10 @@ if sys.version_info.major != 3:
 
 setup(name='barcode-predict',
       packages=[],
-      install_requires=[],
+      install_requires=[
+            'tensorflow-gpu==1.14.0',
+            'keras==2.3.1'
+      ],
       description='Repository for training barcode recognition models',
       author='Kindred AI',
       url='https://github.com/sulfurheron/barcode-predict',
