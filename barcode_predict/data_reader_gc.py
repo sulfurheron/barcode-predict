@@ -1,10 +1,8 @@
 from google.cloud import bigquery
 from dotdict import dotdict
-from PIL import Image, ImageDraw
+from PIL import Image
 import os
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import boto3
 import datetime
 import asyncio
@@ -18,10 +16,19 @@ import argparse
 class ImageDownloader:
     """Downloads scanner images and barcode outlines from S3 and GC.
     
-    Repeatedly downloads and processes an `_interval_length` hours worth
-    of scanner images in a loop, until `im_total` images are collected.
-    Starting from a prespecified start date, keeps moving the time interval
-    to pull from going backward in time.
+    Iteratively downloads and processes an `_interval_length` hours worth
+    of scanner images until `im_total` images are collected. Starting from
+    a specified start date, keeps moving the time interval to pull from
+    going backward in time.
+
+    Args:
+        bucket: either 'kin-sms-media-live' (production) or
+            'kin-sms-media-staging' (staging).
+        datadir: a string path to a directory where the data will be stored
+        interval_length: an integer number of hours representing duration
+            of a time interval for a single data batch
+        im_total: an integer total number of images to download
+        img_dim: a tuple of image dimensions in which to store the images
     """
     def __init__(self,
                  bucket,
@@ -39,7 +46,15 @@ class ImageDownloader:
         self.gc_client = bigquery.Client(project='kin-reporting')
 
     def query_metadata(self, interval):
-        """Builds and send a query to GC to get scanner images metadata."""
+        """Builds and send a query to GC to get scanner images metadata.
+        
+        Args:
+            interval: a tuple of string dates representing time interval
+                from which to pull the data.
+        
+        Returns:
+            urls: a list of dictionary metadata objects downloaded from GC.
+        """
         query = """
             select
               phase_group_id,
@@ -78,8 +93,111 @@ class ImageDownloader:
             row = dotdict(row)
             urls.append(row)
         print("Found {} urls".format(len(urls)))
-        return urls
+        return urls    
 
+    def update_interval(self, int_end_str):
+        """Shifts a time interval by `self._interval_length` hours.
+        
+        Args:
+            int_end_str: a string date reporesenting the end of a current
+                time interval.
+        
+        Returns:
+            interval: a tuple of string dates representing a new interval.
+            int_end_str: a string date - the end of a new interval.
+        """
+        date_fmt = "%Y-%m-%d %H:%M:%S"
+        delta = datetime.timedelta(hours=self._interval_length)
+        int_end_dt = datetime.datetime.strptime(int_end_str, date_fmt)
+        int_start_dt = int_end_dt - delta
+        int_start_str = int_start_dt.strftime(date_fmt)
+        interval = (int_start_str, int_end_str)
+        int_end_str = int_start_str
+        return interval, int_end_str
+
+    def download_batch(self, int_end_str, max_batch_size=100):
+        """Download next batch of images and barcode outlines.
+        
+        Args:
+            int_end_str: a string date - the end of a current time interval.
+            max_batch_size: the size of a batch to attempt to download
+                at once.
+        
+        Returns:
+            interval: a tuple of string dates representing updated
+                time interval.
+            int_end_str: a string date - the end of a new interval.
+            urls: a list of dictionary metadata objects corresponding to
+                downloaded images.
+        """
+        interval, int_end_str = self.update_interval(int_end_str)
+        print("interval", interval)
+        urls = self.query_metadata(interval)
+        if not len(urls):
+            return interval, int_end_str, urls
+        # check if the temp directory exists:
+        if os.path.isdir(self.datadir_temp):
+            try:
+                shutil.rmtree(self.datadir_temp)
+            except OSError as e:
+                print("Error cleaning directory: %s : %s" % (
+                    self.datadir_temp,
+                    e.strerror
+                ))
+        os.mkdir(self.datadir_temp)
+        for i in range(0, len(urls), max_batch_size):
+            self.download_images(
+                to_downloads=urls[i:i+max_batch_size],
+                out_dir=self.datadir_temp,
+            )
+        return interval, int_end_str, urls
+
+    def resize_outline(self, outline, orig_shape, new_shape):
+        """Resize barcode outline coordinates based on the new image size."""
+        new_outline = [
+            {
+                "x": point["x"] * new_shape[1]/(orig_shape[1] + 0.0),
+                "y": point["y"] * new_shape[0]/(orig_shape[0] + 0.0)
+            } for point in outline
+        ]
+        return new_outline
+
+    def resize_and_save(self, filename, current_dir, url, new_shape):
+        """Resizes an image and stores it into a new directory structure.
+        
+        Stores at most 1000 images per directory to ensure efficient random
+        file access by OS during training.
+        
+        Args:
+            filename: the name of a file to which the image is currently stored.
+            current_dir: a new directory to which to store the image.
+            url: a dictionary metadata object corresponding to the image.
+            new_shape: a tuple representing image size to resize the image to.
+            
+        Returns:
+            orig_shape: a tuple original image size
+            small_outline: a resized barcode outline according to the new_shape
+            image_path: a new path to the image file
+        """
+        try:
+            im_path = os.path.join(
+                self.datadir_temp,
+                url['phase_group_id'],
+                filename
+            )
+            img = np.array(Image.open(im_path))
+        except Exception as e:
+            print("Exception when reading image file:", e)
+            return None, None, None
+        orig_shape = img.shape
+        small_img = cv2.resize(img, new_shape, cv2.INTER_AREA)        
+        small_outline = self.resize_outline(url["outline"], orig_shape, 
+                                            new_shape)        
+        image_path = os.path.join(current_dir, os.path.splitext(filename)[0])
+        image_path += ".npy"
+        np.save(image_path, small_img)       
+        return orig_shape, small_outline, image_path
+    
     def download_images(self, to_downloads, out_dir):
         """Downloads images from S3 based on list of urls."""
         missing_grasp_ids = []
@@ -134,71 +252,6 @@ class ImageDownloader:
                       'exception': ce.__str__(),
                   })
 
-    def update_interval(self, int_end_str):
-        """Shifts a time interval by `self._interval_length` hours."""
-        date_fmt = "%Y-%m-%d %H:%M:%S"
-        delta = datetime.timedelta(hours=self._interval_length)
-        int_end_dt = datetime.datetime.strptime(int_end_str, date_fmt)
-        int_start_dt = int_end_dt - delta
-        int_start_str = int_start_dt.strftime(date_fmt)
-        interval = (int_start_str, int_end_str)
-        int_end_str = int_start_str
-        return interval, int_end_str
-
-    def download_batch(self, int_end_str, max_batch_size=100):
-        """Download next batch of images and barcode outlines."""
-        interval, int_end_str = self.update_interval(int_end_str)
-        print("interval", interval)
-        urls = self.query_metadata(interval)
-        if not len(urls):
-            return interval, int_end_str, urls
-        # check if the temp directory exists:
-        if os.path.isdir(self.datadir_temp):
-            try:
-                shutil.rmtree(self.datadir_temp)
-            except OSError as e:
-                print("Error cleaning directory: %s : %s" % (
-                    self.datadir_temp,
-                    e.strerror
-                ))
-        os.mkdir(self.datadir_temp)
-        for i in range(0, len(urls), max_batch_size):
-            self.download_images(
-                to_downloads=urls[i:i+max_batch_size],
-                out_dir=self.datadir_temp,
-            )
-        return interval, int_end_str, urls
-
-    def resize_outline(self, outline, orig_shape, new_shape):
-        """Resize barcode outline coordinates based on the new image size."""
-        new_outline = [
-            {
-                "x": point["x"] * new_shape[1]/(orig_shape[1] + 0.0),
-                "y": point["y"] * new_shape[0]/(orig_shape[0] + 0.0)
-            } for point in outline
-        ]
-        return new_outline
-
-    def resize_and_save(self, filename, current_dir, url, new_shape):
-        try:
-            im_path = os.path.join(
-                self.datadir_temp,
-                url['phase_group_id'],
-                filename
-            )
-            img = np.array(Image.open(im_path))
-        except Exception as e:
-            print("Exception when reading image file:", e)
-            return None, None, None
-        orig_shape = img.shape
-        small_img = cv2.resize(img, new_shape, cv2.INTER_AREA)        
-        small_outline = self.resize_outline(url["outline"], orig_shape, 
-                                            new_shape)        
-        image_path = os.path.join(current_dir, os.path.splitext(filename)[0])
-        image_path += ".npy"
-        np.save(image_path, small_img)       
-        return orig_shape, small_outline, image_path
-
     def sort_files(self, data_dict, urls, interval):
         """Iterates over pulled urls and processes corresponding image files."""
         #plt.figure(figsize=(20, 12))
@@ -215,6 +268,7 @@ class ImageDownloader:
         print("total images", self.images_num)
 
     def process_image_file(self, filename, url, data_dict, interval):
+        """Processes a single image file."""
         if not 'scanner-{}'.format(url["scanner_id"]) in filename:
             return
         current_dir = os.path.join(self.datadir, str(self.current_dir_id))
@@ -238,31 +292,10 @@ class ImageDownloader:
         if self.current_file_id > 1000:
             self.current_dir_id += 1
             self.current_file_id = 0
-        self.images_num += 1
-
-        # if self.images_num < 9:
-        #     img = np.array(Image.open(os.path.join(self.datadir_temp, url['phase_group_id'], filename)))
-        #     orig_shape = img.shape
-        #     new_shape = (256, 256)
-        #     print("shape", img.shape)
-        #     small_img = cv2.resize(img, new_shape, cv2.INTER_AREA)
-        #     mask = Image.new('L', new_shape, 0)
-        #     outline = [(point["x"], point["y"])  for point in small_outline]
-        #     ImageDraw.Draw(mask).polygon(outline, outline=1, fill=1)
-        #     mask = np.array(mask)
-        #     print("mask vals", np.max(mask), np.min(mask))
-        #     print("outline", url["outline"])
-        #     ax = plt.subplot(4, 4, 2 * (self.images_num - 1) + 1)
-        #     plt.imshow(small_img, cmap='gray')
-        #     plt.subplot(4, 4, 2 * self.images_num)
-        #     plt.imshow(mask, cmap='gray')
-        #     #outline = [(point["x"] * new_shape[1]/(orig_shape[1] + 0.0), point["y"] * new_shape[0]/(orig_shape[0] + 0.0)) for point in url["outline"]]
-        #     ax.add_patch(patches.Polygon(np.array(outline), color='g', fill=False))
-        # else:
-        #     plt.show()
+        self.images_num += 1        
 
     def pull_data(self, end_date_str="2021-05-11 00:00:00"):
-        """Download `im_total` images, process and add to the ML dataset."""
+        """Downloads, processes and adds to the dataset `im_total` images."""
         self.images_num = 0
         self.current_dir_id = 0
         self.current_file_id = 0
@@ -281,11 +314,10 @@ class ImageDownloader:
             self.sort_files(data_dict, urls, interval)
             if self.images_num >= self.im_total:
                 break
-
-
+                
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='RLScan offline analysis')
+    parser = argparse.ArgumentParser(description='Scanner Images Downloader')
     parser.add_argument(
         '--datadir',
         type=str,
@@ -294,30 +326,10 @@ if __name__ == "__main__":
     parser.add_argument('--images_total', type=int, default=1000000)
     parser.add_argument('--interval_length', type=int, default=1)
     args = parser.parse_args()
-
-    imd = ImageDownloader(
+    imdl = ImageDownloader(
         bucket="kin-sms-media-live",
         datadir=args.datadir,
         im_total=args.images_total,
         interval_length=args.interval_length
     )
-    imd.pull_data()
-    # urls = imd.query_metadata()
-    # imd.download(urls)
-    # plt.figure(figsize=(20, 12))
-    # count = 0
-    # for url in urls:
-    #     filenames = os.listdir(os.path.join("images", url['phase_group_id']))
-    #     print("filenames", filenames)
-    #     for file in filenames:
-    #         if "scanner-1" in file:
-    #             count += 1
-    #             if count < 17:
-    #                 img = np.array(Image.open(os.path.join("images", url['phase_group_id'], file)))
-    #                 print("shape", img.shape)
-    #                 print("outline", url["outline"])
-    #                 ax = plt.subplot(4, 4, count)
-    #                 plt.imshow(img, cmap='gray')
-    #                 outline = [(point["x"], point["y"]) for point in url["outline"]]
-    #                 ax.add_patch(patches.Polygon(np.array(outline), color='g', fill=False))
-    # plt.show()
+    imdl.pull_data()
