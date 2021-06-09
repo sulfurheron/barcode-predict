@@ -41,7 +41,7 @@ class KerasDataGenerator(keras.utils.Sequence):
         batches_per_epoch = self.data_gen.data_size[self.dataset]//self.data_gen.batch_size[self.dataset]
         if self.dataset == "train":
             if self.data_gen.data_size[self.dataset] > 5e5:
-                batches_per_epoch //= 10    # define epoch as 1/10-th of a dataset size
+                batches_per_epoch //= 1000    # define epoch as 1/10-th of a dataset size
             else:
                 batches_per_epoch //= 2
         return batches_per_epoch
@@ -87,48 +87,56 @@ class BarcodeModel:
             else:
                 self.build_model_simple()
 
+    def init_session(self):
+        config = tf.ConfigProto(
+            allow_soft_placement=True
+        )
+        config.gpu_options.allow_growth = True
+        self.sess = tf.Session(config=config)
+        self.sess.__enter__()
+        K.set_session(self.sess)
 
     def build_model_simple(self):
         """Builds the network symbolic graph in tensorflow."""
         self.img = Input(name="input", shape=self.input_shape, dtype='float32')
         x = self.img
         base_layers = [
-            Conv2D(16, (5, 5), strides=(2, 2),
+            Conv2D(32, (3, 3), strides=(2, 2),
                                              activation="relu",
                                              padding='same'),
-            Conv2D(32, (5, 5), strides=(2, 2),
+            Conv2D(64, (3, 3), strides=(2, 2),
                                          activation="relu",
                                          padding='same'),
 
-            Conv2D(32, (5, 5), strides=(1, 1),
-                                             activation="relu",
-                                             padding='same'),
-
-            Conv2D(64, (5, 5), strides=(2, 2),
-                                             activation="relu",
-                                             padding='same'),
-
-            Conv2D(64, (5, 5), strides=(1, 1),
-                                             activation="relu",
-                                             padding='same'),
-            Conv2D(64, (5, 5), strides=(2, 2),
-                                             activation="relu",
-                                             padding='same'),
-            Conv2D(64, (5, 5), strides=(1, 1),
-                                             activation="relu",
-                                             padding='same'),
-            Conv2D(64, (5, 5), strides=(2, 2),
-                                             activation="relu",
-                                             padding='same'),
-            Conv2D(64, (5, 5), strides=(1, 1),
-                                             activation="relu",
-                                             padding='same'),
             Conv2D(64, (3, 3), strides=(1, 1),
+                                             activation="relu",
+                                             padding='same'),
+
+            Conv2D(128, (3, 3), strides=(2, 2),
+                                             activation="relu",
+                                             padding='same'),
+
+            Conv2D(128, (3, 3), strides=(1, 1),
+                                             activation="relu",
+                                             padding='same'),
+            Conv2D(128, (3, 3), strides=(2, 2),
+                                             activation="relu",
+                                             padding='same'),
+            Conv2D(128, (3, 3), strides=(1, 1),
+                                             activation="relu",
+                                             padding='same'),
+            Conv2D(128, (3, 3), strides=(2, 2),
+                                             activation="relu",
+                                             padding='same'),
+            # Conv2D(64, (5, 5), strides=(1, 1),
+            #                                  activation="relu",
+            #                                  padding='same'),
+            Conv2D(128, (3, 3), strides=(1, 1),
                                              activation="relu",
                                              padding='same')
         ]
         decoder_layers = [
-            Conv2DTranspose(64, (3, 3), strides=(2, 2),
+            Conv2DTranspose(128, (3, 3), strides=(2, 2),
                                              activation="relu",
                                              padding='same'),
             Conv2DTranspose(64, (3, 3), strides=(2, 2),
@@ -193,14 +201,14 @@ class BarcodeModel:
             metrics=["accuracy"],
         )
 
-    def init_session(self):
-        """Initializes tensorflow session."""
-        config = tf.ConfigProto(
-            allow_soft_placement=True
-        )
-        config.gpu_options.allow_growth = True
-        self.sess = tf.Session(config=config)
-        self.sess.__enter__()
+    # def init_session(self):
+    #     """Initializes tensorflow session."""
+    #     config = tf.ConfigProto(
+    #         allow_soft_placement=True
+    #     )
+    #     config.gpu_options.allow_growth = True
+    #     self.sess = tf.Session(config=config)
+    #     self.sess.__enter__()
 
     def train(self):
         """Runs the model training loop."""
@@ -489,10 +497,10 @@ if __name__ == "__main__":
         datadir=args.datadir,
         gpu=args.gpu,
     )
-    model.model.load_weights("saved_models/barcode_prediction_model_2021-05-13-12-04-02.pkl")
+    #model.model.load_weights("saved_models/barcode_prediction_model_2021-05-19-13-07-40.pkl")
     model.train()
-    model.evaluate_on_validation_set()
-    model.show_pictures()
+    #model.evaluate_on_validation_set()
+    #model.show_pictures()
     #model.show_pictures_no_scan()
     #model.save()
 

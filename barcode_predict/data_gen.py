@@ -20,7 +20,7 @@ class DataGen:
             self,
             datadir="/home/dmytro/Data/scanner_images",
             datadir_val="/home/dkorenkevych/Data/scanner_images_test",
-            num_workers=10,
+            num_workers=5,
             img_dim=(256, 256),
             separate_validation=False
     ):
@@ -40,8 +40,8 @@ class DataGen:
             'val': {}
         }
         self.batch_size = {
-            'train': 100,
-            'val': 100
+            'train': 64,
+            'val': 64
         }
         self.data_size = {
             'train': 0,
@@ -52,7 +52,7 @@ class DataGen:
             'val': 0
         }
         self.img_dim = img_dim
-        self._batch_buffer_size = 10
+        self._batch_buffer_size = 5
         self._terminate = mp.Value('i', 0)
         self._start = {
             'train': mp.Value('i', 0),
@@ -230,7 +230,7 @@ class DataGen:
                     self._batch_dict[dataset][id]["start_ix"].value = start_ix
                     self._new_batch[dataset][id].value = 1
                     batches_aval = sum([self._new_batch[dataset][i].value for i in self._new_batch[dataset]])
-                    if dataset == "train" and batches_aval < 5:
+                    if dataset == "train" and batches_aval < -5:
                         print("Prepared new batch, {} batches available".format(batches_aval))
                     self.progress_in_epoch.value = (self._start[dataset].value + 0.0)/len(self._permuted_ix[dataset])
                     self._locks[dataset][id].release()
