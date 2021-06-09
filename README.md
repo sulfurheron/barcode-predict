@@ -9,7 +9,7 @@ The input data we have stored in S3 looks like the following:
 
 Below are some examples of predictions by a trained model:
 
-![](assets/barcodes_model_predicitons_sub_1.png)
+![](assets/barcode_model_predictions_sub_1.png)
 
 More details on the project can be found on the [wiki page](https://kindredai.atlassian.net/wiki/spaces/PID/pages/2087714884/Learning+to+recognize+barcodes+in+scanner+images).
 
