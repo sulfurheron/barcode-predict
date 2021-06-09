@@ -12,6 +12,7 @@ import shutil
 import pickle
 import cv2
 import argparse
+import sys
 
 class ImageDownloader:
     """Downloads scanner images and barcode outlines from S3 and GC.
@@ -321,11 +322,17 @@ if __name__ == "__main__":
     parser.add_argument(
         '--datadir',
         type=str,
-        default="/home/dkorenkevych/Data/scanner_images"
+        required=True
     )
     parser.add_argument('--images_total', type=int, default=1000000)
     parser.add_argument('--interval_length', type=int, default=1)
     args = parser.parse_args()
+
+    if not os.path.isdir(args.datadir):
+        print("The {} directory doesn't exist, please make"
+              " sure you provided the correct path.".format(args.datadir))
+        sys.exit(1)
+
     imdl = ImageDownloader(
         bucket="kin-sms-media-live",
         datadir=args.datadir,
