@@ -7,7 +7,7 @@ The input data we have stored in S3 looks like the following:
 
 ![](assets/barcodes_raw_data.png) 
 
-Below are examples of predictions by a trained model:
+Below are some examples of predictions by a trained model:
 
 ![](assets/barcodes_model_predicitons_sub_1.png)
 
@@ -24,7 +24,7 @@ python data_reader_gc.py --datadir `path_to_a_directory_to_store_the_data_to`
 To train the model:
 
 ```
-python train.py --datadir `path_to_directory_containing_the_data` 
+python train.py --datadir `path_to_a_directory_containing_the_data` 
 
 ```
 
